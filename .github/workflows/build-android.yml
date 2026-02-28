@@ -1,0 +1,89 @@
+name: Build Android App
+
+on:
+  push:
+    branches: [ main ]
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Versión de la app'
+        required: true
+        default: '1.0.0'
+
+jobs:
+  build-android:
+    runs-on: windows-latest
+    
+    steps:
+    - name: Checkout código
+      uses: actions/checkout@v4
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '8.0.x'
+
+    - name: Instalar workload MAUI
+      run: dotnet workload install maui-android
+
+    - name: Restaurar paquetes
+      run: dotnet restore src/MiAppAndroid/MiAppAndroid.csproj
+
+    - name: Compilar Android
+      run: |
+        dotnet publish src/MiAppAndroid/MiAppAndroid.csproj `
+          -f net8.0-android `
+          -c Release `
+          -o ./publish `
+          -p:ApplicationVersion=${{ github.event.inputs.version || '1.0.0' }} `
+          -p:AndroidVersionCode=${{ github.run_number }}
+
+    - name: Listar archivos generados
+      run: Get-ChildItem ./publish -Recurse
+
+    - name: Buscar APK
+      run: |
+        $apk = Get-ChildItem ./publish -Filter *.apk | Select-Object -First 1
+        if ($apk) {
+          echo "APK encontrado: $($apk.FullName)"
+          echo "APK_PATH=$($apk.FullName)" >> $env:GITHUB_ENV
+        } else {
+          Write-Error "No se encontró el archivo APK"
+          exit 1
+        }
+
+    - name: Crear Release
+      uses: softprops/action-gh-release@v2
+      if: startsWith(github.ref, 'refs/tags/') || github.event.inputs.version != ''
+      with:
+        tag_name: v${{ github.event.inputs.version || github.ref_name }}
+        name: MiAppAndroid v${{ github.event.inputs.version || github.ref_name }}
+        body: |
+          # 📱 MiAppAndroid v${{ github.event.inputs.version || github.ref_name }}
+          
+          ## ✨ Novedades:
+          - App Android básica funcional
+          - Interfaz simple con MAUI
+          - Saludo personalizado
+          
+          ## 📥 Descargas:
+          - APK para instalar directamente en Android
+          
+          ## 🔧 Requisitos:
+          - Android 5.0 (API 21) o superior
+          - Permite "Instalar desde orígenes desconocidos"
+          
+          ## ⚙️ Build: ${{ github.run_number }}
+        files: |
+          ${{ env.APK_PATH }}
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Subir APK como artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: MiAppAndroid-v${{ github.event.inputs.version || github.run_number }}
+        path: ./publish/*.apk
+        retention-days: 90
